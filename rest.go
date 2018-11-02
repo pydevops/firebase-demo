@@ -24,6 +24,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"time"
 
 	"cloud.google.com/go/storage"
 
@@ -43,7 +44,9 @@ type User struct {
 	Email    string `json:"email"`
 	Password string `json:"password"`
 }
-
+type GCSPath struct {
+	Path string `json:"path"`
+}
 type JwtToken struct {
 	Token string `json:"token"`
 }
@@ -56,6 +59,12 @@ const (
 	apiKey            = "AIzaSyDZwA-8oKtLWz6GyDVNNKr_v4nLaq57-Yo"
 	bucket            = "pso-victory-dev.appspot.com"
 	workDir           = "work_area"
+)
+
+var (
+	ctx        context.Context
+	authClient *auth.Client
+	bh         *storage.BucketHandle
 )
 
 func signInWithPassword(email, password string) (string, error) {
@@ -156,12 +165,12 @@ func CreateTokenEndpoint(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 	//log.Printf("firebaseIdToken=%s\n", firebaseIdToken)
-
+	expireToken := time.Now().Add(time.Second * 20).Unix()
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
-		"email":    user.Email,
-		"password": user.Password,
+		"email": user.Email,
+		"exp":   expireToken,
 	})
-	tokenString, error := token.SignedString([]byte("secret"))
+	tokenString, error := token.SignedString([]byte("WhatIssecret"))
 	if error != nil {
 		fmt.Println(error)
 	}
@@ -170,7 +179,7 @@ func CreateTokenEndpoint(w http.ResponseWriter, req *http.Request) {
 
 func ValidateJWToken(next http.HandlerFunc) http.HandlerFunc {
 	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-		authorizationHeader := req.Header.Get("authorization")
+		authorizationHeader := req.Header.Get("Authorization")
 		if authorizationHeader != "" {
 			bearerToken := strings.Split(authorizationHeader, " ")
 			if len(bearerToken) == 2 {
@@ -178,7 +187,7 @@ func ValidateJWToken(next http.HandlerFunc) http.HandlerFunc {
 					if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
 						return nil, fmt.Errorf("There was an error")
 					}
-					return []byte("secret"), nil
+					return []byte("WhatIssecret"), nil
 				})
 				if error != nil {
 					json.NewEncoder(w).Encode(Exception{Message: error.Error()})
@@ -244,16 +253,12 @@ func UploadEndpoint(w http.ResponseWriter, req *http.Request) {
 	}
 	defer objWriter.Close()
 
-	json.NewEncoder(w).Encode(objName)
+	json.NewEncoder(w).Encode(GCSPath{Path: objName})
 }
 func renderError(w http.ResponseWriter, message string, statusCode int) {
 	w.WriteHeader(http.StatusBadRequest)
 	w.Write([]byte(message))
 }
-
-var ctx context.Context
-var authClient *auth.Client
-var bh *storage.BucketHandle
 
 func main() {
 
